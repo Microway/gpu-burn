@@ -185,7 +185,8 @@ template <class T> class GPU_Test {
 	}
 
 	void initCompareKernel() {
-		checkError(cuModuleLoad(&d_module, "compare.ptx"), "load module");
+		//makefile defines COMPARE to allow different optimized builds
+		checkError(cuModuleLoad(&d_module, COMPARE), "load module");
 		checkError(cuModuleGetFunction(&d_function, d_module, 
 					d_doubles ? "compareD" : "compare"), "get func");
 
@@ -205,7 +206,7 @@ template <class T> class GPU_Test {
 		checkError(cuMemcpyDtoH(&faultyElems, d_faultyElemData, sizeof(int)), "Read faultyelemdata");
 		if (faultyElems) {
 			d_error += (long long int)faultyElems;
-			//printf("WE FOUND %d FAULTY ELEMENTS from GPU %d\n", faultyElems, d_devNumber);
+			printf("WE FOUND %d FAULTY ELEMENTS from GPU %d\n", faultyElems, d_devNumber);
 		}
 	}
 
@@ -391,12 +392,18 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 		if (childReport) {
 			float elapsed = fminf((float)(time(0)-startTime)/(float)runTime*100.0f, 100.0f);
 			printf("\r%.1f%%  ", elapsed);
+			printf("proc: ");
 			for (size_t i = 0; i < clientCalcs.size(); ++i) {
-				printf("%d", clientCalcs.at(i));
+				if (clientCalcs.at(i) > 1000000 )
+				  printf("%.2fM", (float)clientCalcs.at(i)/(float)1000000);
+				else if (clientCalcs.at(i) > 1000 )
+				  printf("%dK", clientCalcs.at(i)/1000);
+				else
+				  printf("%d", clientCalcs.at(i));
 				if (i != clientCalcs.size() - 1)
 					printf("/");
 			}
-			printf(" err:");
+			printf(" err: ");
 			for (size_t i = 0; i < clientErrors.size(); ++i) {
 				std::string note = "%d";
 				if (clientCalcs.at(i) == -1)
@@ -408,7 +415,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 				if (i != clientCalcs.size() - 1)
 					printf("/");
 			}
-			printf(" tmp:");
+			printf(" tmp: ");
 			for (size_t i = 0; i < clientTemp.size(); ++i) {
 				printf(clientTemp.at(i) != 0 ? "%dC" : "-- ", clientTemp.at(i));
 				if (i != clientCalcs.size() - 1)
