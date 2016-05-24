@@ -1,11 +1,10 @@
 /* 
  * Public domain.  No warranty.
- * Ville Timonen 2012
+ * Ville Timonen 2013
  */
 
-#define SIZE 1024 // Matrices are SIZE*SIZE..  1024^2 should be efficiently implemented in CUBLAS
+#define SIZE 1024ul // Matrices are SIZE*SIZE..  1024^2 should be efficiently implemented in CUBLAS
 #define USEMEM 0.9 // Try to allocate 90% of memory
-#define FREEMEM 1024*1024*50      //mimimum 50MB free
 
 #include <cstdio>
 #include <string>
@@ -15,12 +14,10 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <cuda.h>
 #include "cublas_v2.h"
-#include <builtin_types.h>
-
-using namespace std;
 
 void checkError(int rCode, std::string desc = "") {
 	static std::map<int, std::string> g_errorStrings;
@@ -87,9 +84,9 @@ void checkError(cublasStatus_t rCode, std::string desc = "") {
 			g_errorStrings[rCode];
 }
 
-class GPU_Test {
+template <class T> class GPU_Test {
 	public:
-	GPU_Test(int dev) : d_devNumber(dev) {
+	GPU_Test(int dev, bool doubles) : d_devNumber(dev), d_doubles(doubles) {
 		checkError(cuDeviceGet(&d_dev, d_devNumber));
 		checkError(cuCtxCreate(&d_ctx, 0, d_dev));
 
@@ -117,7 +114,7 @@ class GPU_Test {
 		return tempErrs;
 	}
 
-	int getIters() {
+	size_t getIters() {
 		return d_iters;
 	}
 
@@ -139,16 +136,14 @@ class GPU_Test {
 		return freeMem;
 	}
 
-	void initBuffers(float *A, float *B) {
+	void initBuffers(T *A, T *B) {
 		bind();
 
-		size_t useBytesPercent = (size_t)((double)availMemory()*USEMEM);
-                size_t useBytesHard = (size_t)((double)availMemory()-FREEMEM);
-                size_t useBytes=(useBytesPercent>useBytesHard) ? useBytesPercent : useBytesHard;
-
-		printf("Initialized device %d with %ld MB of memory (%ld MB available, using %ld MB of it)\n",
-				d_devNumber, totalMemory()/1024/1024, availMemory()/1024/1024, useBytes/1024/1024);
-		size_t d_resultSize = sizeof(float)*SIZE*SIZE;
+		size_t useBytes = (size_t)((double)availMemory()*USEMEM);
+		printf("Initialized device %d with %lu MB of memory (%lu MB available, using %lu MB of it), %s\n",
+				d_devNumber, totalMemory()/1024ul/1024ul, availMemory()/1024ul/1024ul, useBytes/1024ul/1024ul,
+				d_doubles ? "using DOUBLES" : "using FLOATS");
+		size_t d_resultSize = sizeof(T)*SIZE*SIZE;
 		d_iters = (useBytes - 2*d_resultSize)/d_resultSize; // We remove A and B sizes
 		//printf("Results are %d bytes each, thus performing %d iterations\n", d_resultSize, d_iters);
 		checkError(cuMemAlloc(&d_Cdata, d_iters*d_resultSize), "C alloc");
@@ -168,26 +163,37 @@ class GPU_Test {
 		bind();
 		static const float alpha = 1.0f;
 		static const float beta = 0.0f;
+		static const double alphaD = 1.0;
+		static const double betaD = 0.0;
 
-		for (int i = 0; i < d_iters; ++i) {
-			checkError(cublasSgemm(d_cublas, CUBLAS_OP_N, CUBLAS_OP_N,
-						SIZE, SIZE, SIZE, &alpha,
-						(const float*)d_Adata, SIZE,
-						(const float*)d_Bdata, SIZE,
-						&beta, 
-						(float*)d_Cdata + i*SIZE*SIZE, SIZE), "SGEMM");
+		for (size_t i = 0; i < d_iters; ++i) {
+			if (d_doubles)
+				checkError(cublasDgemm(d_cublas, CUBLAS_OP_N, CUBLAS_OP_N,
+							SIZE, SIZE, SIZE, &alphaD,
+							(const double*)d_Adata, SIZE,
+							(const double*)d_Bdata, SIZE,
+							&betaD, 
+							(double*)d_Cdata + i*SIZE*SIZE, SIZE), "DGEMM");
+			else
+				checkError(cublasSgemm(d_cublas, CUBLAS_OP_N, CUBLAS_OP_N,
+							SIZE, SIZE, SIZE, &alpha,
+							(const float*)d_Adata, SIZE,
+							(const float*)d_Bdata, SIZE,
+							&beta, 
+							(float*)d_Cdata + i*SIZE*SIZE, SIZE), "SGEMM");
 		}
 	}
 
 	void initCompareKernel() {
 		checkError(cuModuleLoad(&d_module, "compare.ptx"), "load module");
-		checkError(cuModuleGetFunction(&d_function, d_module, "compare"), "get func");
+		checkError(cuModuleGetFunction(&d_function, d_module, 
+					d_doubles ? "compareD" : "compare"), "get func");
 
 		checkError(cuFuncSetCacheConfig(d_function, CU_FUNC_CACHE_PREFER_L1), "L1 config");
-		checkError(cuParamSetSize(d_function, __alignof(float*)*2 + __alignof(int)), "set param size");
-		checkError(cuParamSetv(d_function, 0, &d_Cdata, sizeof(float*)), "set param");
-		checkError(cuParamSetv(d_function, __alignof(float*), &d_faultyElemData, sizeof(float*)), "set param");
-		checkError(cuParamSetv(d_function, __alignof(float*)*2, &d_iters, sizeof(int)), "set param");
+		checkError(cuParamSetSize(d_function, __alignof(T*) + __alignof(int*) + __alignof(size_t)), "set param size");
+		checkError(cuParamSetv(d_function, 0, &d_Cdata, sizeof(T*)), "set param");
+		checkError(cuParamSetv(d_function, __alignof(T*), &d_faultyElemData, sizeof(T*)), "set param");
+		checkError(cuParamSetv(d_function, __alignof(T*) + __alignof(int*), &d_iters, sizeof(size_t)), "set param");
 
 		checkError(cuFuncSetBlockShape(d_function, g_blockSize, g_blockSize, 1), "set block size");
 	}
@@ -198,14 +204,15 @@ class GPU_Test {
 		checkError(cuLaunchGrid(d_function, SIZE/g_blockSize, SIZE/g_blockSize), "Launch grid");
 		checkError(cuMemcpyDtoH(&faultyElems, d_faultyElemData, sizeof(int)), "Read faultyelemdata");
 		if (faultyElems) {
-			d_error += faultyElems;
+			d_error += (long long int)faultyElems;
 			//printf("WE FOUND %d FAULTY ELEMENTS from GPU %d\n", faultyElems, d_devNumber);
 		}
 	}
 
 	private:
+	bool d_doubles;
 	int d_devNumber;
-	int d_iters;
+	size_t d_iters;
 	size_t d_resultSize;
 
 	long long int d_error;
@@ -242,10 +249,10 @@ int initCuda() {
 	return deviceCount;
 }
 
-void startBurn(int index, int writeFd, float *A, float *B) {
-	GPU_Test *our;
+template<class T> void startBurn(int index, int writeFd, T *A, T *B, bool doubles) {
+	GPU_Test<T> *our;
 	try {
-		our = new GPU_Test(index);
+		our = new GPU_Test<T>(index, doubles);
 		our->initBuffers(A, B);
 	} catch (std::string e) {
 		fprintf(stderr, "Couldn't init a GPU test: %s\n", e.c_str());
@@ -268,6 +275,10 @@ void startBurn(int index, int writeFd, float *A, float *B) {
 		}
 	} catch (std::string e) {
 		fprintf(stderr, "Failure during compute: %s\n", e.c_str());
+		int ops = -1;
+		// Signalling that we failed
+		write(writeFd, &ops, sizeof(int));
+		write(writeFd, &ops, sizeof(int));
 		exit(111);
 	}
 }
@@ -325,7 +336,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 	FD_ZERO(&waitHandles);
 	FD_SET(tempHandle, &waitHandles);
 
-	for (int i = 0; i < clientFd.size(); ++i) {
+	for (size_t i = 0; i < clientFd.size(); ++i) {
 		if (clientFd.at(i) > maxHandle)
 			maxHandle = clientFd.at(i);
 		FD_SET(clientFd.at(i), &waitHandles);
@@ -336,7 +347,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 	std::vector<int> clientCalcs;
 	std::vector<bool> clientFaulty;
 
-	for (int i = 0; i < clientFd.size(); ++i) {
+	for (size_t i = 0; i < clientFd.size(); ++i) {
 		clientTemp.push_back(0);
 		clientErrors.push_back(0);
 		clientCalcs.push_back(0);
@@ -350,7 +361,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 	while ((changeCount = select(maxHandle+1, &waitHandles, NULL, NULL, NULL))) {
 		//printf("got new data! %d\n", changeCount);
 		// Going through all descriptors
-		for (int i = 0; i < clientFd.size(); ++i)
+		for (size_t i = 0; i < clientFd.size(); ++i)
 			if (FD_ISSET(clientFd.at(i), &waitHandles)) {
 				// First, reading processed
 				int processed, errors;
@@ -359,7 +370,10 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 				read(clientFd.at(i), &errors, sizeof(int));
 
 				clientErrors.at(i) += errors;
-				clientCalcs.at(i) += processed;
+				if (processed == -1)
+					clientCalcs.at(i) = -1;
+				else
+					clientCalcs.at(i) += processed;
 
 				childReport = true;
 			}
@@ -370,30 +384,35 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 		// Resetting the listeners
 		FD_ZERO(&waitHandles);
 		FD_SET(tempHandle, &waitHandles);
-		for (int i = 0; i < clientFd.size(); ++i)
+		for (size_t i = 0; i < clientFd.size(); ++i)
 			FD_SET(clientFd.at(i), &waitHandles);
 
 		// Printing progress (if a child has initted already)
 		if (childReport) {
 			float elapsed = fminf((float)(time(0)-startTime)/(float)runTime*100.0f, 100.0f);
 			printf("\r%.1f%%  ", elapsed);
-			printf("proc'd: ");
-			for (int i = 0; i < clientCalcs.size(); ++i) {
-				printf("%d ", clientCalcs.at(i));
+			for (size_t i = 0; i < clientCalcs.size(); ++i) {
+				printf("%d", clientCalcs.at(i));
 				if (i != clientCalcs.size() - 1)
-					printf("/ ");
+					printf("/");
 			}
-			printf("  errors: ");
-			for (int i = 0; i < clientErrors.size(); ++i) {
-				printf(clientErrors.at(i) ? "%d (WARNING!) " : "%d ", clientErrors.at(i));
+			printf(" err:");
+			for (size_t i = 0; i < clientErrors.size(); ++i) {
+				std::string note = "%d";
+				if (clientCalcs.at(i) == -1)
+					note += " (DIED!)";
+				else if (clientErrors.at(i))
+					note += " (WARNING!)";
+
+				printf(note.c_str(), clientErrors.at(i));
 				if (i != clientCalcs.size() - 1)
-					printf("/ ");
+					printf("/");
 			}
-			printf("  temps: ");
-			for (int i = 0; i < clientTemp.size(); ++i) {
-				printf(clientTemp.at(i) != 0 ? "%d C " : "-- ", clientTemp.at(i));
+			printf(" tmp:");
+			for (size_t i = 0; i < clientTemp.size(); ++i) {
+				printf(clientTemp.at(i) != 0 ? "%dC" : "-- ", clientTemp.at(i));
 				if (i != clientCalcs.size() - 1)
-					printf("/ ");
+					printf("/");
 			}
 			
 			fflush(stdout);
@@ -406,12 +425,22 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 				fflush(stdout);
 				printf("\n");
 				//printf("\t(checkpoint)\n");
-				for (int i = 0; i < clientErrors.size(); ++i) {
+				for (size_t i = 0; i < clientErrors.size(); ++i) {
 					if (clientErrors.at(i))
 						clientFaulty.at(i) = true;
 					clientErrors.at(i) = 0;
 				}
 			}
+		}
+
+		// Checking whether all clients are dead
+		bool oneAlive = false;
+		for (size_t i = 0; i < clientCalcs.size(); ++i)
+			if (clientCalcs.at(i) != -1)
+				oneAlive = true;
+		if (!oneAlive) {
+			fprintf(stderr, "\n\nNo clients are alive!  Aborting\n");
+			exit(123);
 		}
 
 		if (startTime + runTime < time(0))
@@ -420,7 +449,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 
 	printf("\nKilling processes.. ");
 	fflush(stdout);
-	for (int i = 0; i < clientPid.size(); ++i)
+	for (size_t i = 0; i < clientPid.size(); ++i)
 		kill(clientPid.at(i), 15);
 	
 	kill(tempPid, 15);
@@ -429,30 +458,23 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 	while (wait(NULL) != -1);
 	printf("done\n");
 
-	printf("\nTested %ld GPUs:\n", clientPid.size());
-	for (int i = 0; i < clientPid.size(); ++i)
-		printf("\t%d: %s\n", i, clientFaulty.at(i) ? "FAULTY" : "OK");
+	printf("\nTested %d GPUs:\n", (int)clientPid.size());
+	for (size_t i = 0; i < clientPid.size(); ++i)
+		printf("\tGPU %d: %s\n", (int)i, clientFaulty.at(i) ? "FAULTY" : "OK");
 }
 
-int main(int argc, char **argv) {
-	int RUNLENGTH = 10,garbage;;
-	if (argc < 2)
-		printf("Run length not specified in the command line.  Burning for 10 secs\n");
-	else 
-		RUNLENGTH = atoi(argv[1]);
-
-	garbage=system("nvidia-smi -L");
+template<class T> void launch(int runLength, bool useDoubles) {
+	system("nvidia-smi -L");
 
 	// Initting A and B with random data
-	float *A = (float*) malloc(sizeof(float)*SIZE*SIZE);
-	float *B = (float*) malloc(sizeof(float)*SIZE*SIZE);
+	T *A = (T*) malloc(sizeof(T)*SIZE*SIZE);
+	T *B = (T*) malloc(sizeof(T)*SIZE*SIZE);
 	srand(10);
-	for (int i = 0; i < SIZE*SIZE; ++i) {
-		A[i] = (float)((double)(rand()%1000000)/100000.0);
-		B[i] = (float)((double)(rand()%1000000)/100000.0);
+	for (size_t i = 0; i < SIZE*SIZE; ++i) {
+		A[i] = (T)((double)(rand()%1000000)/100000.0);
+		B[i] = (T)((double)(rand()%1000000)/100000.0);
 	}
 
-	int deviceCount;
 	// Forking a process..  This one checks the number of devices to use,
 	// returns the value, and continues to use the first one.
 	int mainPipe[2];
@@ -470,10 +492,10 @@ int main(int argc, char **argv) {
 		int devCount = initCuda();
 		write(writeFd, &devCount, sizeof(int));
 
-		startBurn(0, writeFd, A, B);
+		startBurn<T>(0, writeFd, A, B, useDoubles);
 
 		close(writeFd);
-		return 0;
+		return;
 	} else {
 		clientPids.push_back(myPid);
 
@@ -496,25 +518,44 @@ int main(int argc, char **argv) {
 					// Child
 					close(slavePipe[0]);
 					initCuda();
-					startBurn(i, slavePipe[1], A, B);
+					startBurn<T>(i, slavePipe[1], A, B, useDoubles);
 
 					close(slavePipe[1]);
-					return 0;
+					return;
 				} else {
 					clientPids.push_back(slavePid);
 					close(slavePipe[1]);
 				}
 			}
 			
-			listenClients(clientPipes, clientPids, RUNLENGTH);
+			listenClients(clientPipes, clientPids, runLength);
 		}
 	}
 
-	for (int i = 0; i < clientPipes.size(); ++i)
+	for (size_t i = 0; i < clientPipes.size(); ++i)
 		close(clientPipes.at(i));
 
 	free(A);
 	free(B);
+}
+
+int main(int argc, char **argv) {
+	int runLength = 10;
+	bool useDoubles = false;
+	int thisParam = 0;
+	if (argc >= 2 && std::string(argv[1]) == "-d") {
+			useDoubles = true;
+			thisParam++;
+		}
+	if (argc-thisParam < 2)
+		printf("Run length not specified in the command line.  Burning for 10 secs\n");
+	else 
+		runLength = atoi(argv[1+thisParam]);
+
+	if (useDoubles)
+		launch<double>(runLength, useDoubles);
+	else
+		launch<float>(runLength, useDoubles);
 
 	return 0;
 }

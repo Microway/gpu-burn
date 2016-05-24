@@ -1,15 +1,12 @@
-CUDAPATH=/usr/local/cuda
-#GCCPATH=/usr/local/gcc-4.4
+CUDAPATH=/opt/cuda
+
+# Have this point to an old enough gcc (for nvcc)
+GCCPATH=/usr
 
 NVCC=${CUDAPATH}/bin/nvcc
-#CCPATH=${GCCPATH}/bin
+CCPATH=${GCCPATH}/bin
 
 drv:
-	${NVCC} -arch=compute_20 -ptx compare.cu -o compare.ptx
-	g++ -Wno-unused-result -g -O3 -I${CUDAPATH}/include -L${CUDAPATH}/lib64 -c -o gpu_burn-drv.o gpu_burn-drv.cpp
-	${NVCC} -o gpu_burn -lcuda -lcublas gpu_burn-drv.o
-
-clean:
-	/bin/rm -f gpu_burn gpu_burn-drv.o compare.ptx
-
-
+	PATH=.:${CCPATH}:${PATH} ${NVCC} -arch=compute_30 -ptx compare.cu -o compare.ptx
+	g++ -O3 -I${CUDAPATH}/include -c gpu_burn-drv.cpp
+	g++ -o gpu_burn gpu_burn-drv.o -O3 -lcuda -L${CUDAPATH}/lib64 -L${CUDAPATH}/lib -Wl,-rpath=${CUDAPATH}/lib64 -Wl,-rpath=${CUDAPATH}/lib -lcublas -lcudart -o gpu_burn
