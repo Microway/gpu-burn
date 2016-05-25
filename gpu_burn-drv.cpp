@@ -1,6 +1,22 @@
-/* 
- * Public domain.  No warranty.
- * Ville Timonen 2013
+/*
+ * Original project released under the public domain by Ville Timonen in 2013
+ *
+ * All changes and improvements Copyright (c) 2013-2016 by Microway, Inc.
+ *
+ * This file is part of Microway gpu-burn
+ *
+ * Microway gpu-burn is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Microway gpu-burn is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with gpu-burn.  If not, see <http://www.gnu.org/licenses/>
  */
 
 #define SIZE 1024ul // Matrices are SIZE*SIZE..  1024^2 should be efficiently implemented in CUBLAS
@@ -59,9 +75,9 @@ void checkError(int rCode, std::string desc = "") {
 	}
 
 	if (rCode != CUDA_SUCCESS)
-		throw ((desc == "") ? 
-				std::string("Error: ") : 
-				(std::string("Error in \"") + desc + std::string("\": "))) + 
+		throw ((desc == "") ?
+				std::string("Error: ") :
+				(std::string("Error in \"") + desc + std::string("\": "))) +
 			g_errorStrings[rCode];
 }
 
@@ -78,9 +94,9 @@ void checkError(cublasStatus_t rCode, std::string desc = "") {
 	}
 
 	if (rCode != CUBLAS_STATUS_SUCCESS)
-		throw ((desc == "") ? 
-				std::string("Error: ") : 
-				(std::string("Error in \"") + desc + std::string("\": "))) + 
+		throw ((desc == "") ?
+				std::string("Error: ") :
+				(std::string("Error in \"") + desc + std::string("\": "))) +
 			g_errorStrings[rCode];
 }
 
@@ -172,14 +188,14 @@ template <class T> class GPU_Test {
 							SIZE, SIZE, SIZE, &alphaD,
 							(const double*)d_Adata, SIZE,
 							(const double*)d_Bdata, SIZE,
-							&betaD, 
+							&betaD,
 							(double*)d_Cdata + i*SIZE*SIZE, SIZE), "DGEMM");
 			else
 				checkError(cublasSgemm(d_cublas, CUBLAS_OP_N, CUBLAS_OP_N,
 							SIZE, SIZE, SIZE, &alpha,
 							(const float*)d_Adata, SIZE,
 							(const float*)d_Bdata, SIZE,
-							&beta, 
+							&beta,
 							(float*)d_Cdata + i*SIZE*SIZE, SIZE), "SGEMM");
 		}
 	}
@@ -187,7 +203,7 @@ template <class T> class GPU_Test {
 	void initCompareKernel() {
 		//makefile defines COMPARE to allow different optimized builds
 		checkError(cuModuleLoad(&d_module, COMPARE), "load module");
-		checkError(cuModuleGetFunction(&d_function, d_module, 
+		checkError(cuModuleGetFunction(&d_function, d_module,
 					d_doubles ? "compareD" : "compare"), "get func");
 
 		checkError(cuFuncSetCacheConfig(d_function, CU_FUNC_CACHE_PREFER_L1), "L1 config");
@@ -287,7 +303,7 @@ template<class T> void startBurn(int index, int writeFd, T *A, T *B, bool double
 int pollTemp(pid_t *p) {
 	int tempPipe[2];
 	pipe(tempPipe);
-	
+
 	pid_t myPid = fork();
 
 	if (!myPid) {
@@ -295,7 +311,7 @@ int pollTemp(pid_t *p) {
 		dup2(tempPipe[1], STDOUT_FILENO); // Stdout
 		execlp("nvidia-smi", "nvidia-smi", "-l", "5", "-q", "-d", "TEMPERATURE", NULL);
 		fprintf(stderr, "Could not invoke nvidia-smi, no temps available\n");
-		
+
 		exit(0);
 	}
 
@@ -329,7 +345,7 @@ void updateTemps(int handle, std::vector<int> *temps) {
 
 void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int runTime) {
 	fd_set waitHandles;
-	
+
 	pid_t tempPid;
 	int tempHandle = pollTemp(&tempPid);
 	int maxHandle = tempHandle;
@@ -354,7 +370,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 		clientCalcs.push_back(0);
 		clientFaulty.push_back(false);
 	}
-	
+
 	time_t startTime = time(0);
 	int changeCount;
 	float nextReport = 10.0f;
@@ -381,7 +397,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 
 		if (FD_ISSET(tempHandle, &waitHandles))
 			updateTemps(tempHandle, &clientTemp);
-		
+
 		// Resetting the listeners
 		FD_ZERO(&waitHandles);
 		FD_SET(tempHandle, &waitHandles);
@@ -421,7 +437,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 				if (i != clientCalcs.size() - 1)
 					printf("/");
 			}
-			
+
 			fflush(stdout);
 
 			if (nextReport < elapsed) {
@@ -458,7 +474,7 @@ void listenClients(std::vector<int> clientFd, std::vector<pid_t> clientPid, int 
 	fflush(stdout);
 	for (size_t i = 0; i < clientPid.size(); ++i)
 		kill(clientPid.at(i), 15);
-	
+
 	kill(tempPid, 15);
 	close(tempHandle);
 
@@ -534,7 +550,7 @@ template<class T> void launch(int runLength, bool useDoubles) {
 					close(slavePipe[1]);
 				}
 			}
-			
+
 			listenClients(clientPipes, clientPids, runLength);
 		}
 	}
@@ -556,7 +572,7 @@ int main(int argc, char **argv) {
 		}
 	if (argc-thisParam < 2)
 		printf("Run length not specified in the command line.  Burning for 10 secs\n");
-	else 
+	else
 		runLength = atoi(argv[1+thisParam]);
 
 	if (useDoubles)
