@@ -15,10 +15,26 @@ As the tool runs, the status of each GPU is output (including number of passes,
 number of errors encountered, and current GPU temperatures).
 
 
-### Installation
+### Compilation
 This tool must be compiled using GCC and NVIDIA CUDA. On most systems, all that
 will be necessary is to run `make`. The Makefile does its best to locate all the
-necessary dependencies. Once compiled, execute: `./gpu_burn`
+necessary dependencies. Once compiled, you can execute a test run with:
+`./gpu_burn`
+
+
+### Installation
+An RPM can be created by running the following from the base directory:
+```
+VERSION=0.4.6
+fpm -t rpm -s dir --prefix=/usr                                             \
+    --name gpu-burn -v ${VERSION}                                           \
+    --vendor Microway --license GPLv3                                       \
+    --url https://github.com/Microway/gpu-burn                              \
+    --description 'Utility for stress-testing NVIDIA GPU accelerators'      \
+     gpu_burn=sbin/ gpu_burn.cuda_kernel=libexec/
+```
+
+A DEB can be created by replacing the `-t rpm` above with `-t deb`.
 
 
 ### Execution
