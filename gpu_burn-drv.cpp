@@ -201,8 +201,14 @@ template <class T> class GPU_Test {
 	}
 
 	void initCompareKernel() {
-		//makefile defines COMPARE to allow different optimized builds
-		checkError(cuModuleLoad(&d_module, COMPARE), "load module");
+		// The required file may be in the current directory or in /usr/libexec/
+		if (access("gpu_burn.cuda_kernel", R_OK) != -1)
+			checkError(cuModuleLoad(&d_module, "gpu_burn.cuda_kernel"), "load module");
+		else if (access("/usr/libexec/gpu_burn.cuda_kernel", R_OK) != -1)
+			checkError(cuModuleLoad(&d_module, "/usr/libexec/gpu_burn.cuda_kernel"), "load module");
+		else
+			fprintf(stderr, "\nUnable to find the CUDA kernels file: gpu_burn.cuda_kernel\n");
+
 		checkError(cuModuleGetFunction(&d_function, d_module,
 					d_doubles ? "compareD" : "compare"), "get func");
 
