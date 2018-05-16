@@ -1,25 +1,27 @@
 # If the CUDA environment variables are already set, use them
-CUDA_PATH?=${CUDA_HOME}
-
-# If the above did not find anything, then use the default path to
-# NVIDIA CUDA (typically installed into /usr/local/cuda)
-CUDA_PATH?=/usr/local/cuda
-
-# If none of the above worked, try some other common paths
-ifneq ("$(wildcard $(CUDA_PATH))","")
-# The default PATH is good - nothing else to do
-else ifneq ("$(wildcard /usr/local/cuda-9.0)","")
-CUDA_PATH=/usr/local/cuda-9.0
-else ifneq ("$(wildcard /usr/local/cuda-8.0)","")
-CUDA_PATH=/usr/local/cuda-8.0
-else ifneq ("$(wildcard /usr/local/cuda-7.5)","")
-CUDA_PATH=/usr/local/cuda-7.5
-else ifneq ("$(wildcard /usr/local/cuda-7.0)","")
-CUDA_PATH=/usr/local/cuda-7.0
-else ifneq ("$(wildcard /usr/local/cuda-6.5)","")
-CUDA_PATH=/usr/local/cuda-6.5
-else ifneq ("$(wildcard /opt/cuda)","")
-CUDA_PATH=/opt/cuda
+ifeq ($(CUDA_HOME), )
+	# If the above did not find anything, then use the default path to
+	# NVIDIA CUDA (typically installed into /usr/local/cuda)
+	# If none of the above worked, try some other common paths
+	ifneq ($(wildcard /usr/local/cuda), )
+		CUDA_PATH=/usr/local/cuda
+	else ifneq ($(wildcard /usr/local/cuda-9.1),)
+		CUDA_PATH=/usr/local/cuda-9.1
+	else ifneq ($(wildcard /usr/local/cuda-9.0),)
+		CUDA_PATH=/usr/local/cuda-9.0
+	else ifneq ($(wildcard /usr/local/cuda-8.0),)
+		CUDA_PATH=/usr/local/cuda-8.0
+	else ifneq ($(wildcard /usr/local/cuda-7.5),)
+		CUDA_PATH=/usr/local/cuda-7.5
+	else ifneq ($(wildcard /usr/local/cuda-7.0),)
+		CUDA_PATH=/usr/local/cuda-7.0
+	else ifneq ($(wildcard /usr/local/cuda-6.5),)
+		CUDA_PATH=/usr/local/cuda-6.5
+	else ifneq ($(wildcard /opt/cuda),)
+		CUDA_PATH=/opt/cuda
+	endif
+else
+	CUDA_PATH=$(CUDA_HOME)
 endif
 
 
