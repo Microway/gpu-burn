@@ -30,7 +30,7 @@ GCCPATH=/usr
 
 NVCC=${CUDA_PATH}/bin/nvcc
 CCPATH=${GCCPATH}/bin
-CUDA_VER_MAJOR=$(shell cat ${CUDA_PATH}/version.txt | sed -e 's/CUDA Version //' | cut -c 1)
+CUDA_VER_MAJOR=$(shell cat ${CUDA_PATH}/version.txt | sed -e 's/CUDA Version //' | cut -d '.' -f 1)
 
 ifeq ($(shell expr ${CUDA_VER_MAJOR} \>= 9), 1)
 	NVCCFLAGS=-gencode=arch=compute_30,code=sm_30 -gencode=arch=compute_35,code=compute_35 -gencode=arch=compute_37,code=compute_37 -gencode=arch=compute_50,code=sm_50 -gencode=arch=compute_52,code=sm_52 -I. -I${CUDA_PATH}/include --fatbin
